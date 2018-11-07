@@ -40,8 +40,8 @@
 //! length), the `Length` field, and the `S1` field (which just contains 2 unused bits, but they
 //! must still be sent, of course).
 
-use ble::link::{MAX_PDU_SIZE, ADVERTISING_ADDRESS, CRC_PRESET, CRC_POLY, LinkLayer, Transmitter, RadioCmd, advertising, data};
-use ble::phy::{AdvertisingChannelIndex, DataChannelIndex};
+use super::ble::link::{MAX_PDU_SIZE, ADVERTISING_ADDRESS, CRC_PRESET, CRC_POLY, LinkLayer, Transmitter, RadioCmd, advertising, data};
+use super::ble::phy::{AdvertisingChannelIndex, DataChannelIndex};
 
 use nrf51::{FICR, RADIO};
 use nrf51::radio::state::STATER;
