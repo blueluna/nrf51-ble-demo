@@ -16,7 +16,7 @@ use crate::hal::nrf51;
 use crate::hal::nrf51::interrupt;
 use crate::hal::prelude::*;
 use crate::hal::gpio::{OpenDrain, Output};
-use crate::hal::gpio::gpio::PIN16;
+use crate::hal::gpio::gpio::PIN7;
 
 use nrf51_ble_demo as ble;
 
@@ -39,7 +39,7 @@ static mut BLE_TX_BUF :PacketBuffer = [0; MAX_PDU_SIZE + 1];
 static mut BLE_RX_BUF :PacketBuffer = [0; MAX_PDU_SIZE + 1];
 
 static RTC: Mutex<RefCell<Option<nrf51::RTC0>>> = Mutex::new(RefCell::new(None));
-static LED: Mutex<RefCell<Option<PIN16<Output<OpenDrain>>>>> = Mutex::new(RefCell::new(None));
+static LED: Mutex<RefCell<Option<PIN7<Output<OpenDrain>>>>> = Mutex::new(RefCell::new(None));
 static OFF: Mutex<RefCell<Option<bool>>> = Mutex::new(RefCell::new(None));
 static BLE: Mutex<RefCell<Option<BleHandler>>> = Mutex::new(RefCell::new(None));
 
@@ -68,10 +68,17 @@ fn main() -> ! {
         };
         let device_address = DeviceAddress::new(devaddr, devaddr_type);
 
+        let services = AdStructure::ServiceUuids16 {
+            incomplete: false,
+            uuids: &[0x181au16]
+        };
         let mut ll = LinkLayer::new(device_address);
-        ll.start_advertise(Duration::from_millis(10), &[
+        ll.start_advertise(Duration::from_millis(200), &[
             AdStructure::Flags(Flags::discoverable()),
             AdStructure::CompleteLocalName("KIRE NOSSNEVS"),
+            AdStructure::TxPowerLevel(4), // 4 dBm
+            services,
+
         ]);
 
         // TIMER0 cfg, 32 bit @ 1 MHz
@@ -95,7 +102,7 @@ fn main() -> ! {
             let gpio = p.GPIO.split();
             let bb = Baseband::new(BleRadio::new(p.RADIO, &p.FICR,
                     unsafe { &mut BLE_TX_BUF }), unsafe { &mut BLE_RX_BUF }, ll);
-            *LED.borrow(cs).borrow_mut() = Some(gpio.pin16.into_open_drain_output());
+            *LED.borrow(cs).borrow_mut() = Some(gpio.pin7.into_open_drain_output());
             *RTC.borrow(cs).borrow_mut() = Some(p.RTC0);
             *OFF.borrow(cs).borrow_mut() = Some(false);
             *BLE.borrow(cs).borrow_mut() = Some(BleHandler{

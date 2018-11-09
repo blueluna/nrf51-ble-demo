@@ -48,6 +48,9 @@ pub enum AdStructure<'a> {
     /// Sets the shortened device name.
     ShortenedLocalName(&'a str),
 
+    /// Transmitter power level in dBm, -127 to +127 dBm
+    TxPowerLevel(i8),
+
     #[doc(hidden)]
     __Nonexhaustive,
 }
@@ -60,6 +63,7 @@ impl<'a> AdStructure<'a> {
     const TYPE_COMPLETE_LIST_OF_16BIT_SERVICE_UUIDS: u8 = 0x03;
     const TYPE_SHORTENED_LOCAL_NAME: u8 = 0x08;
     const TYPE_COMPLETE_LOCAL_NAME: u8 = 0x09;
+    const TYPE_TX_POWER_LEVEL: u8 = 0x0a;
     const TYPE_SERVICE_DATA_16BIT_UUID: u8 = 0x16;
 
     /// Lowers this AD structure into a Byte buffer.
@@ -78,7 +82,7 @@ impl<'a> AdStructure<'a> {
                 buf[1] = Self::TYPE_FLAGS;
                 buf[2] = flags.to_u8();
                 1
-            },
+            }
             AdStructure::ServiceUuids16 { incomplete, uuids } => {
                 assert!(uuids.len() < 127);
                 buf[1] = if incomplete {
@@ -108,12 +112,17 @@ impl<'a> AdStructure<'a> {
                 buf[1] = Self::TYPE_COMPLETE_LOCAL_NAME;
                 buf[2..name.len()+2].copy_from_slice(name.as_bytes());
                 name.len() as u8
-            },
+            }
             AdStructure::ShortenedLocalName(name) => {
                 assert!(name.len() < 255);
                 buf[1] = Self::TYPE_SHORTENED_LOCAL_NAME;
                 buf[2..name.len()+2].copy_from_slice(name.as_bytes());
                 name.len() as u8
+            }
+            AdStructure::TxPowerLevel(level) => {
+                buf[1] = Self::TYPE_TX_POWER_LEVEL;
+                buf[2] = level as u8;
+                1
             }
             AdStructure::__Nonexhaustive => unreachable!(),
         };
