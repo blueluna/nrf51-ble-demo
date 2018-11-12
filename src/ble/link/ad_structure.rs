@@ -49,7 +49,15 @@ pub enum AdStructure<'a> {
     ShortenedLocalName(&'a str),
 
     /// Transmitter power level in dBm, -127 to +127 dBm
+    /// Supplement to the Core Bluetooth Specification, CSSv7, Part A, Chapter 1.5
     TxPowerLevel(i8),
+
+    /// The Appearance characteristic defines the representation of the
+    /// external appearance of the device.
+    /// Supplement to the Core Bluetooth Specification, CSSv7, Part A, Chapter 1.12
+    /// Specification of the Bluetooth System 4.1, Vol 3, Part C, Chapter 12.2
+    /// https://www.bluetooth.com/specifications/gatt/viewer?attributeXmlFile=org.bluetooth.characteristic.gap.appearance.xml
+    Appearance(u16),
 
     #[doc(hidden)]
     __Nonexhaustive,
@@ -65,6 +73,7 @@ impl<'a> AdStructure<'a> {
     const TYPE_COMPLETE_LOCAL_NAME: u8 = 0x09;
     const TYPE_TX_POWER_LEVEL: u8 = 0x0a;
     const TYPE_SERVICE_DATA_16BIT_UUID: u8 = 0x16;
+    const TYPE_APPEARANCE: u8 = 0x19;
 
     /// Lowers this AD structure into a Byte buffer.
     ///
@@ -123,6 +132,12 @@ impl<'a> AdStructure<'a> {
                 buf[1] = Self::TYPE_TX_POWER_LEVEL;
                 buf[2] = level as u8;
                 1
+            }
+            AdStructure::Appearance(appearance) => {
+                buf[1] = Self::TYPE_APPEARANCE;
+                buf[2] = appearance as u8;
+                buf[3] = (appearance >> 8) as u8;
+                2
             }
             AdStructure::__Nonexhaustive => unreachable!(),
         };

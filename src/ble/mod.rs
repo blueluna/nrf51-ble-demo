@@ -4,7 +4,6 @@
 
 #[macro_use]
 mod utils;
-mod crc;
 pub mod link;
 pub mod phy;
 

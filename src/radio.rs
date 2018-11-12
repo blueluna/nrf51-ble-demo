@@ -81,7 +81,7 @@ impl BleRadio {
 
         unsafe {
             radio.pcnf1.write(|w| w
-                .maxlen().bits(37)   // no packet length limit
+                .maxlen().bits(MAX_PDU_SIZE as u8)   // no packet length limit
                 .balen().bits(3)     // 3-Byte Base Address + 1-Byte Address Prefix
                 .whiteen().set_bit() // Enable Data Whitening over PDU+CRC
             );
@@ -101,17 +101,9 @@ impl BleRadio {
             radio.prefix0.write(|w| w.ap0().bits((ADVERTISING_ADDRESS >> 24) as u8));
         }
 
-        // FIXME: No TIFS hardware support for now. Revisit when precise semantics are clear.
-        // Activate END_DISABLE and DISABLED_TXEN shortcuts so TIFS is enforced. We might enable
-        // more shortcuts later.
-        /*radio.shorts.write(|w| w
-            .end_disable().enabled()
-            .disabled_txen().enabled()
-        );*/
-
-        /*unsafe {
-            radio.tifs.write(|w| w.tifs().bits(BLE_TIFS));
-        }*/
+        unsafe {
+            radio.tifs.write(|w| w.tifs().bits(150));
+        }
 
         // Configure shortcuts to simplify and speed up sending and receiving packets.
         radio.shorts.write(|w| w
@@ -249,12 +241,14 @@ impl Baseband {
         self.radio.radio.events_end.reset();
 
         if self.radio.radio.crcstatus.read().crcstatus().is_crcok() {
+            let _s0 = self.rx_buf[0];
+            let length = self.rx_buf[1];
+            let _s1 = self.rx_buf[2];
             let header = advertising::Header::parse(self.rx_buf);
 
             // TODO check that `payload_length` is sane
-
             let cmd = {
-                let payload = &self.rx_buf[2..2 + header.payload_length() as usize];
+                let payload = &self.rx_buf[3..3 + length as usize];
                 self.ll.process_adv_packet(&mut self.radio, header, payload)
             };
             self.configure_receiver(cmd.radio);

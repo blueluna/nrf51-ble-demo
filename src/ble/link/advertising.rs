@@ -60,7 +60,7 @@ pub enum StructuredPdu<'a> {
     ScanRsp {
         advertiser_address: DeviceAddress,
         /// Response data (may be empty). Up to 31 octets / 15 AD structures.
-        scan_response_data: &'a mut [AdStructure<'a>],
+        advertiser_data: &'a [AdStructure<'a>],
     },
 
     #[doc(hidden)]
@@ -88,7 +88,8 @@ impl<'a> StructuredPdu<'a> {
         match *self {
             StructuredPdu::AdvInd { ref advertiser_address, advertiser_data } |
             StructuredPdu::AdvNonconnInd { ref advertiser_address, advertiser_data } |
-            StructuredPdu::AdvScanInd { ref advertiser_address, advertiser_data } => {
+            StructuredPdu::AdvScanInd { ref advertiser_address, advertiser_data } |
+            StructuredPdu::ScanRsp { ref advertiser_address, advertiser_data } => {
                 payload[0..6].copy_from_slice(advertiser_address.raw());
                 let data_buf = &mut payload[6..];
                 let mut ad_size = 0;
@@ -96,7 +97,6 @@ impl<'a> StructuredPdu<'a> {
                     let bytes = ad.lower(&mut data_buf[ad_size..]);
                     ad_size += bytes;
                 }
-
                 assert!(data_buf.len() <= 31);
                 assert!(ad_size < 50);  // 50 or something, not very important
                 header.set_payload_length(6 + ad_size as u8);
@@ -111,7 +111,6 @@ impl<'a> StructuredPdu<'a> {
                 payload[6..12].copy_from_slice(initiator_address.raw());
             },
             StructuredPdu::ScanReq { .. } => unimplemented!(),
-            StructuredPdu::ScanRsp { .. } => unimplemented!(),
             StructuredPdu::__Nonexhaustive => unreachable!(),
         }
 
@@ -120,6 +119,7 @@ impl<'a> StructuredPdu<'a> {
 }
 
 /// 16-bit Advertising Channel PDU header preceding the Payload.
+/// Specification of Bluetooth System, v4.1, Volume 6, Part B, Chapter 2.3.
 ///
 /// The header looks like this:
 ///

@@ -33,14 +33,12 @@ use cortex_m_semihosting::hprintln;
 struct BleHandler {
     baseband: Baseband,
     timer: nrf51::TIMER0,
+    led: PIN7<Output<OpenDrain>>
 }
 
 static mut BLE_TX_BUF :PacketBuffer = [0; MAX_PDU_SIZE + 1];
 static mut BLE_RX_BUF :PacketBuffer = [0; MAX_PDU_SIZE + 1];
 
-static RTC: Mutex<RefCell<Option<nrf51::RTC0>>> = Mutex::new(RefCell::new(None));
-static LED: Mutex<RefCell<Option<PIN7<Output<OpenDrain>>>>> = Mutex::new(RefCell::new(None));
-static OFF: Mutex<RefCell<Option<bool>>> = Mutex::new(RefCell::new(None));
 static BLE: Mutex<RefCell<Option<BleHandler>>> = Mutex::new(RefCell::new(None));
 
 #[entry]
@@ -62,8 +60,10 @@ fn main() -> ! {
         LittleEndian::write_u16(&mut devaddr[4..], devaddr_hi);
 
         let devaddr_type = if p.FICR.deviceaddrtype.read().deviceaddrtype().is_public() {
+            hprintln!("Public address").unwrap();
             AddressKind::Public
         } else {
+            hprintln!("Random address").unwrap();
             AddressKind::Random
         };
         let device_address = DeviceAddress::new(devaddr, devaddr_type);
@@ -77,8 +77,8 @@ fn main() -> ! {
             AdStructure::Flags(Flags::discoverable()),
             AdStructure::CompleteLocalName("KIRE NOSSNEVS"),
             AdStructure::TxPowerLevel(4), // 4 dBm
+            AdStructure::Appearance(1344), // Unofficial appearance Generic Sensor
             services,
-
         ]);
 
         // TIMER0 cfg, 32 bit @ 1 MHz
@@ -91,69 +91,42 @@ fn main() -> ! {
             .compare0_stop().enabled()
         );
         // Queue first baseband update
-        cfg_timer(&p.TIMER0, Some(Duration::from_millis(1)));
-
-        p.RTC0.prescaler.write(|w| unsafe { w.bits(16383) });
-        p.RTC0.evtenset.write(|w| w.tick().set_bit());
-        p.RTC0.intenset.write(|w| w.tick().set_bit());
-        p.RTC0.tasks_start.write(|w| unsafe { w.bits(1) });
+        cfg_timer(&p.TIMER0, Some(Duration::from_millis(10)));
 
         cortex_m::interrupt::free(move |cs| {
             let gpio = p.GPIO.split();
             let bb = Baseband::new(BleRadio::new(p.RADIO, &p.FICR,
                     unsafe { &mut BLE_TX_BUF }), unsafe { &mut BLE_RX_BUF }, ll);
-            *LED.borrow(cs).borrow_mut() = Some(gpio.pin7.into_open_drain_output());
-            *RTC.borrow(cs).borrow_mut() = Some(p.RTC0);
-            *OFF.borrow(cs).borrow_mut() = Some(false);
             *BLE.borrow(cs).borrow_mut() = Some(BleHandler{
                 baseband: bb,
                 timer: p.TIMER0,
+                led: gpio.pin7.into_open_drain_output()
             });
         });
 
         if let Some(mut p) = Peripherals::take() {
-            p.NVIC.enable(nrf51::Interrupt::RTC0);
-            nrf51::NVIC::unpend(nrf51::Interrupt::RTC0);
             p.NVIC.enable(nrf51::Interrupt::TIMER0);
             nrf51::NVIC::unpend(nrf51::Interrupt::TIMER0);
+            p.NVIC.enable(nrf51::Interrupt::RADIO);
+            nrf51::NVIC::unpend(nrf51::Interrupt::RADIO);
         }
     }
-
-    hprintln!("Initialised").unwrap();
 
     loop {
         continue;
     }
 }
 
-interrupt!(RTC0, rtc_event);
 interrupt!(RADIO, radio_event);
 interrupt!(TIMER0, timer0_event);
 
-fn rtc_event() {
-    /* Enter critical section */
-    cortex_m::interrupt::free(|cs| {
-        if let (Some(rtc), Some(led), Some(off)) = (
-            RTC.borrow(cs).borrow().as_ref(),
-            LED.borrow(cs).borrow_mut().deref_mut(),
-            OFF.borrow(cs).borrow_mut().deref_mut()
-        ) {
-            if *off { led.set_high(); } else { led.set_low(); }
-            *off = !*off;
-            /* Clear timer event */
-            rtc.events_tick.write(|w| unsafe { w.bits(0) });
-        }
-    });
-}
-
 fn radio_event() {
-    hprintln!("RE").unwrap();
     cortex_m::interrupt::free(|cs| {
         if let Some(ble) = BLE.borrow(cs).borrow_mut().deref_mut() {
-            hprintln!("Radio event").unwrap();
             if let Some(new_timeout) = ble.baseband.interrupt() {
                 cfg_timer(&ble.timer, Some(new_timeout));
             }
+            ble.led.set_low();
         }
     });
 }
@@ -163,6 +136,7 @@ fn timer0_event() {
         if let Some(ble) = BLE.borrow(cs).borrow_mut().deref_mut() {
             let maybe_next_update = ble.baseband.update();
             cfg_timer(&ble.timer, maybe_next_update);
+            ble.led.set_high();
         }
     });
 }
@@ -181,7 +155,8 @@ fn cfg_timer(t: &nrf51::TIMER0, duration: Option<Duration>) {
         t.cc[0].write(|w| unsafe { w.bits(us) });
         t.events_compare[0].reset();
         t.tasks_start.write(|w| unsafe { w.bits(1) });
-    } else {
+    }
+    else {
         t.events_compare[0].reset();
     }
 }

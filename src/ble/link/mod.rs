@@ -119,14 +119,10 @@ pub mod advertising;
 pub mod data;
 
 use self::ad_structure::AdStructure;
-use self::advertising::StructuredPdu;
+use self::advertising::{StructuredPdu, PduType};
 
-use super::phy::{Radio, AdvertisingChannelIndex, DataChannelIndex};
-use super::crc::ble_crc24;
+use super::phy::{AdvertisingChannelIndex, DataChannelIndex};
 
-use byteorder::{LittleEndian, ByteOrder};
-
-use core::ops::Range;
 use core::time::Duration;
 
 /// The CRC polynomial to use for CRC24 generation.
@@ -221,7 +217,7 @@ impl LinkLayer {
 
         // TODO tear down existing connection?
 
-        let pdu = StructuredPdu::AdvNonconnInd {
+        let pdu = StructuredPdu::AdvInd {
             advertiser_address: self.dev_addr,
             advertiser_data: data
         };
@@ -239,12 +235,23 @@ impl LinkLayer {
     ///
     /// The access address of the packet must be `ADVERTISING_ADDRESS`, the CRC checksum must be
     /// correct.
-    pub fn process_adv_packet<T: Transmitter>(&mut self, tx: &mut T, header: advertising::Header, payload: &[u8]) -> Cmd {
-        let _ = (tx, header, payload);
-
+    pub fn process_adv_packet<T: Transmitter>(&mut self, tx: &mut T, rx_header: advertising::Header, _rx_payload: &[u8]) -> Cmd {
         match self.state {
             State::Standby => unreachable!(),
-            State::Advertising { channel, .. } => {
+            State::Advertising { ref payload, header, channel, .. } => {
+                match rx_header.type_() {
+                    PduType::ScanReq => {
+                        let mut scan_response_header = advertising::Header::new(PduType::ScanRsp);
+                        let payload_length = header.payload_length();
+                        scan_response_header.set_payload_length(payload_length);
+                        scan_response_header.set_rx_add(header.rx_add());
+                        scan_response_header.set_tx_add(header.tx_add());
+                        let payload_length = payload_length as usize;
+                        tx.tx_payload_buf()[..payload_length].copy_from_slice(&payload[..payload_length]);
+                        tx.transmit_advertising(scan_response_header, channel.into());
+                    }
+                    _ => (),
+                }
                 Cmd {
                     radio: RadioCmd::ListenAdvertising {
                         channel,
@@ -413,64 +420,6 @@ pub trait Transmitter {
     /// * `channel`: Data Channel Index to transmit on.
     fn transmit_data(&mut self, access_address: u32, crc_iv: u32, header: data::Header, channel: DataChannelIndex);
 }
-
-/// A `Transmitter` that lowers Link-Layer packets to raw byte arrays that can be directly
-/// transmitted over the air, given a suitable radio.
-///
-/// This implements preamble generation, CRC calculation and whitening in software.
-pub struct RawTransmitter<R: Radio> {
-    tx_buf: [u8; MAX_PACKET_SIZE],
-    radio: R,
-}
-
-const PDU_START: usize = 5;  // First 5 octets are Preamble and Access Address
-const HEADER_RANGE: Range<usize> = PDU_START..PDU_START + 2;
-const PAYLOAD_RANGE: Range<usize> = PDU_START + 2..PDU_START + MAX_PDU_SIZE;
-
-impl<R: Radio> RawTransmitter<R> {
-    pub fn new(radio: R) -> Self {
-        Self {
-            tx_buf: [0; MAX_PACKET_SIZE as usize],
-            radio,
-        }
-    }
-
-    fn transmit(&mut self, access_address: u32, payload_length: u8, crc_iv: u32, freq: u16) {
-        let preamble = if access_address & 1 == 1 {
-            0b01010101
-        } else {
-            0b10101010
-        };
-        self.tx_buf[0] = preamble;
-
-        LittleEndian::write_u32(&mut self.tx_buf[1..5], access_address);
-
-        let crc = ble_crc24(&self.tx_buf[PDU_START..PDU_START + 2 + payload_length as usize], crc_iv);
-        LittleEndian::write_u24(&mut self.tx_buf[MAX_PACKET_SIZE - 3..], crc);
-
-        // TODO whitening
-        if true { unimplemented!(); }
-
-        self.radio.transmit(&mut self.tx_buf, freq);
-    }
-}
-
-impl<R: Radio> Transmitter for RawTransmitter<R> {
-    fn tx_payload_buf(&mut self) -> &mut [u8] {
-        &mut self.tx_buf[PAYLOAD_RANGE]
-    }
-
-    fn transmit_advertising(&mut self, header: advertising::Header, channel: AdvertisingChannelIndex) {
-        LittleEndian::write_u16(&mut self.tx_buf[HEADER_RANGE], header.to_u16());
-        self.transmit(ADVERTISING_ADDRESS, header.payload_length(), CRC_PRESET, channel.freq());
-    }
-
-    fn transmit_data(&mut self, access_address: u32, crc_iv: u32, header: data::Header, channel: DataChannelIndex) {
-        LittleEndian::write_u16(&mut self.tx_buf[HEADER_RANGE], header.to_u16());
-        self.transmit(access_address, header.payload_length(), crc_iv, channel.freq());
-    }
-}
-
 
 /*
 
